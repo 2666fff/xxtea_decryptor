@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Configuration;
 using System.IO;
 using System.Text;
 using System.Windows.Forms;
@@ -18,10 +19,27 @@ namespace XXTEADecrypt
             mForm1 = this;
             mFileHandle = new FileHandle(mForm1, inputPath, outputPath);
             InitializeComponent();
+            
+            int left = int.Parse(ConfigurationManager.AppSettings["WindowLeft"]?? "0");
+            int top = int.Parse(ConfigurationManager.AppSettings["WindowTop"]?? "0");
+            this.StartPosition = FormStartPosition.Manual;
+            this.Left = left;
+            this.Top = top;
+            this.Closing += Form1_Closing;
+        }
+        
+        private void Form1_Closing(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            Configuration config = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None);
+            config.AppSettings.Settings["WindowLeft"].Value = Left.ToString();
+            config.AppSettings.Settings["WindowTop"].Value = Top.ToString();
+            config.Save(ConfigurationSaveMode.Modified);
+            ConfigurationManager.RefreshSection(config.AppSettings.SectionInformation.Name);
         }
 
         private void button1_Click(object sender, EventArgs e)
         {
+            richTextBox_log.AppendText("Start decoding --->" + " 请勿操作 " + "\n");
             TimeSpan ts1 = new TimeSpan(DateTime.Now.Ticks);
              
                     
@@ -41,8 +59,8 @@ namespace XXTEADecrypt
                 Console.WriteLine("输入目录:" + inputPath);
                 if (!CheckFormat()) return;
                 this.Text = "XXTEA解密工具----(解密中...勿操作)";
-                richTextBox_log.AppendText("Start decoding --->" + " 请勿操作 " + "\n");
                 mFileHandle.DirectoryToFile(inputPath);
+                mForm1.richTextBox_log.AppendText("Total files found --->" + mFileHandle.fileBox.Count + "\nDecrypting... \n\n");
             }
             else if (File.Exists(inputPath))
             {
@@ -253,6 +271,13 @@ namespace XXTEADecrypt
         }
         private bool DecryptFile(string inputFile, string outputFile)
         {
+            if (luacToluaCB.Checked)
+            {
+                if (Path.GetExtension(outputFile) == ".luac")
+                {
+                    outputFile = Path.ChangeExtension(outputFile, ".lua");
+                }
+            }
             byte[] srcData = mFileHandle.FileRead(inputFile);  
             byte[] tmp = new byte[XXTEA_sign.Length];
             if (srcData.Length < XXTEA_sign.Length) return false;
@@ -312,6 +337,11 @@ namespace XXTEADecrypt
         {
             richTextBox_log.SelectionStart = richTextBox_log.Text.Length;
             richTextBox_log.ScrollToCaret();
+        }
+
+        private void luacToluaCB_CheckedChanged(object sender, EventArgs e)
+        {
+
         }
 
         /// <summary>

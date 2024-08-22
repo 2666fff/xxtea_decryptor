@@ -118,7 +118,6 @@ public class FileHandle{
             }
             this.DirectoryToFile(nextFolder.FullName);
 		}
-        mForm1.richTextBox_log.AppendText("Total files found --->" + fileBox.Count + "\n Decrypting... \n");
 	}
     
     /// <summary>
