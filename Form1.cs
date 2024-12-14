@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Configuration;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Windows.Forms;
 
@@ -26,6 +27,9 @@ namespace XXTEADecrypt
             this.Left = left;
             this.Top = top;
             this.Closing += Form1_Closing;
+            textBox_sign.Text = ConfigurationManager.AppSettings["LastSignValue"] ?? "";
+            textBox_KEY.Text = ConfigurationManager.AppSettings["LastKEYValue"] ?? "";
+
         }
         
         private void Form1_Closing(object sender, System.ComponentModel.CancelEventArgs e)
@@ -33,6 +37,8 @@ namespace XXTEADecrypt
             Configuration config = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None);
             config.AppSettings.Settings["WindowLeft"].Value = Left.ToString();
             config.AppSettings.Settings["WindowTop"].Value = Top.ToString();
+            config.AppSettings.Settings["LastSignValue"].Value = textBox_sign.Text;
+            config.AppSettings.Settings["LastKEYValue"].Value = textBox_KEY.Text;
             config.Save(ConfigurationSaveMode.Modified);
             ConfigurationManager.RefreshSection(config.AppSettings.SectionInformation.Name);
         }
@@ -49,8 +55,18 @@ namespace XXTEADecrypt
 
             if (!Directory.Exists(outputPath))
             {
-                MessageBox.Show("您的输出目录并不是有效路径!");
-                return;
+                try
+                {
+                    Directory.CreateDirectory(outputPath);
+                    Console.WriteLine($"Created directory: {outputPath}");
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("您的输出目录并不是有效路径!");
+                    Console.WriteLine($"An error occurred while creating directory: {ex.Message}");
+                    // 可以根据具体情况进行更详细的错误处理，比如记录日志、通知用户等。
+                    return;
+                }
             }
             Console.WriteLine("输出目录:" + outputPath);
 
@@ -119,6 +135,8 @@ namespace XXTEADecrypt
         private void textBox_DeDragDrop(object sender, DragEventArgs e)
         {
             textBox_inputPath.Text = ((System.Array)e.Data.GetData(DataFormats.FileDrop)).GetValue(0).ToString();
+            string[] parts = textBox_inputPath.Text.Split('\\');
+            textBox_outputPath.Text = string.Join("\\", parts.Take(parts.Length - 1).Concat(new string[] { "out", parts[parts.Length - 1] }));
         }
 
         private void textBox_DeDragEnter(object sender, DragEventArgs e)
@@ -178,8 +196,19 @@ namespace XXTEADecrypt
 
             if (!Directory.Exists(outputPath))
             {
-                MessageBox.Show("您的输出目录并不是有效路径!");
-                return;
+                try
+                {
+                    Directory.CreateDirectory(outputPath);
+                    Console.WriteLine($"Created directory: {outputPath}");
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("您的输出目录并不是有效路径!");
+                    Console.WriteLine($"An error occurred while creating directory: {ex.Message}");
+                    // 可以根据具体情况进行更详细的错误处理，比如记录日志、通知用户等。
+                    return;
+                }
+                
             }
             Console.WriteLine("输出目录:" + outputPath);
 
@@ -286,7 +315,7 @@ namespace XXTEADecrypt
             {
                 if (tmp[i] != XXTEA_sign[i])
                 {
-                    richTextBox_log.AppendText("签名错误--->" + inputFile + "\n");
+                    richTextBox_log.AppendText("无法解密, copy raw file--->" + inputFile + "\n");
                     return false;
                 }
             }
@@ -296,7 +325,12 @@ namespace XXTEADecrypt
             byte[] data = new byte[len];
             Buffer.BlockCopy(srcData, XXTEA_sign.Length, data, 0, len);
             byte[] data2 = mXXTEAHelp.xxtea_decrypt(data, (uint)len, XXTEA_KEY, (uint)XXTEA_KEY.Length, out ret_length);
-
+            if (data2 == null)
+            {
+                MessageBox.Show("解密失败. 捡查加密信息.");
+                return false; 
+            }
+            
             if (data2.Length < 10)
             {
                 richTextBox_log.AppendText("Decode Failed--->" + inputFile + "\n");
@@ -384,11 +418,11 @@ namespace XXTEADecrypt
         /// <returns>返回结果</returns>
         public bool CheckFormat()
         {
-            if (!textBox_custom.Text.Equals("") || checkBox_lua.Checked || checkBox_luac.Checked || checkBox_zip.Checked || checkBox_png.Checked || checkBox_full.Checked)
+            if (!textBox_custom.Text.Equals("") || checkBox_lua.Checked || checkBox_All.Checked || checkBox_zip.Checked || checkBox_png.Checked || checkBox_full.Checked)
             {
                 if (checkBox_full.Checked)
                 {
-                    if (!textBox_custom.Text.Equals("") || checkBox_lua.Checked || checkBox_luac.Checked || checkBox_zip.Checked || checkBox_png.Checked)
+                    if (!textBox_custom.Text.Equals("") || checkBox_lua.Checked || checkBox_All.Checked || checkBox_zip.Checked || checkBox_png.Checked)
                     {
                         MessageBox.Show("您选择要解密的文件格式存在重复项,请检查后重新选择!");
                         return false;
@@ -408,29 +442,34 @@ namespace XXTEADecrypt
                     }
                 }
                 int i = 0;
-                if (checkBox_luac.Checked)
+                if (checkBox_All.Checked)
                 {
-                    mFileHandle.strFormat[i] = mFileHandle.WildcardToRegex("*.luac$");
+                    mFileHandle.strFormat[0] = ".*";
                     i++;
                 }
-                if (checkBox_lua.Checked)
+                else
                 {
-                    mFileHandle.strFormat[i] = mFileHandle.WildcardToRegex("*.lua$");
-                    i++;
-                }
-                if (checkBox_zip.Checked)
-                {
-                    mFileHandle.strFormat[i] = mFileHandle.WildcardToRegex("*.zip$");
-                    i++;
-                }
-                if (checkBox_png.Checked)
-                {
-                    mFileHandle.strFormat[i] = mFileHandle.WildcardToRegex("*.png$");
-                    i++;
-                }
-                if (!textBox_custom.Text.Equals(""))
-                {
-                    mFileHandle.strFormat[i] = mFileHandle.WildcardToRegex("^" + textBox_custom.Text);
+                    if (checkBox_lua.Checked)
+                    {
+                        mFileHandle.strFormat[i] = mFileHandle.WildcardToRegex("*.lua$");
+                        i++;
+                        mFileHandle.strFormat[i] = mFileHandle.WildcardToRegex("*.luac$");
+                        i++;
+                    }
+                    if (checkBox_zip.Checked)
+                    {
+                        mFileHandle.strFormat[i] = mFileHandle.WildcardToRegex("*.zip$");
+                        i++;
+                    }
+                    if (checkBox_png.Checked)
+                    {
+                        mFileHandle.strFormat[i] = mFileHandle.WildcardToRegex("*.png$");
+                        i++;
+                    }
+                    if (!textBox_custom.Text.Equals(""))
+                    {
+                        mFileHandle.strFormat[i] = mFileHandle.WildcardToRegex("^" + textBox_custom.Text);
+                    }
                 }
             }
             else
