@@ -315,7 +315,8 @@ namespace XXTEADecrypt
             {
                 if (tmp[i] != XXTEA_sign[i])
                 {
-                    richTextBox_log.AppendText("无法解密, copy raw file--->" + inputFile + "\n");
+                    File.Copy(inputFile, outputFile, true); // 强制覆盖
+                    richTextBox_log.AppendText("无法解密，已复制原始文件--->" + inputFile + "\n");
                     return false;
                 }
             }
