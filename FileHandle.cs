@@ -30,7 +30,7 @@ public class FileHandle{
             fs.Close();
             return buffer;
         }
-        catch (Exception e)
+        catch (Exception)
         {
             mForm1.richTextBox_log.AppendText("读文件错误--->" + path + "\n");
             byte[] a = new byte[3];
@@ -48,7 +48,7 @@ public class FileHandle{
             fs.Flush();
             fs.Close();
         }
-        catch (Exception e)
+        catch (Exception)
         {
             mForm1.richTextBox_log.AppendText("写入失败--->" + pathAndName + "\n");
             return false;

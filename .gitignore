@@ -1,0 +1,26 @@
+# Visual Studio
+.vs/
+bin/
+obj/
+Debug/
+Release/
+publish/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build artifacts
+*.exe
+*.dll
+*.pdb
+*.cache
+*.log
+
+# Signing and local settings
+*.pfx
+*.snk
+*.tmp
+
+# Local Codex task ledger
+codex_temp.txt

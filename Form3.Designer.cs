@@ -52,7 +52,7 @@ namespace XXTEADecrypt
             this.linkLabel1.Name = "linkLabel1";
             this.linkLabel1.Size = new System.Drawing.Size(377, 84);
             this.linkLabel1.TabIndex = 1;
-            linkLabel1.Text = "反馈建议：https://github.com/2666fff/XXTEA_Decoder";
+            linkLabel1.Text = "反馈建议：https://github.com/2666fff/xxtea_decryptor";
             linkLabel1.LinkClicked += LinkLabel1_LinkClicked;
             
             // 
@@ -97,7 +97,7 @@ namespace XXTEADecrypt
         
         private void LinkLabel1_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
         {
-            System.Diagnostics.Process.Start("https://github.com/2666fff/XXTEA_Decoder");
+            System.Diagnostics.Process.Start("https://github.com/2666fff/xxtea_decryptor");
         }
 
         #endregion
