@@ -2,6 +2,10 @@
 
 [![Build](https://github.com/2666fff/xxtea_decryptor/actions/workflows/build.yml/badge.svg)](https://github.com/2666fff/xxtea_decryptor/actions/workflows/build.yml)
 
+<p align="center">
+  <img src="main.png" alt="XXTEA Decryptor main window" width="520">
+</p>
+
 A standalone Windows Forms XXTEA encryption and decryption utility for files, folders, Lua assets, and game resource packages.
 
 中文说明：这是一个独立的 XXTEA 加密/解密工具，支持单文件和目录批量处理，适合用于通用 XXTEA 文件解密、资源包解密、Lua/luac 资源分析、游戏资源解包前的数据还原等场景。
