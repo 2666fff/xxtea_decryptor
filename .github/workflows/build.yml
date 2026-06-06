@@ -1,0 +1,36 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Release
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Build
+        run: msbuild XXTEADecrypt.sln /p:Configuration=Release /p:Platform="Any CPU" /m /restore
+
+      - name: Upload Release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: XXTEADecrypt-Release
+          path: |
+            bin/Release/**
+          if-no-files-found: error
