@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Configuration;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -15,6 +16,8 @@ namespace XXTEADecrypt
         public byte[] XXTEA_sign, XXTEA_KEY;
         public FileHandle mFileHandle ;
         public XXTEAHelp mXXTEAHelp = new XXTEAHelp();
+        private string currentLogFilePath = string.Empty;
+        private bool logWriteFailed;
         public Form1()
         {
             mForm1 = this;
@@ -29,6 +32,7 @@ namespace XXTEADecrypt
             this.Closing += Form1_Closing;
             textBox_sign.Text = ConfigurationManager.AppSettings["LastSignValue"] ?? "";
             textBox_KEY.Text = ConfigurationManager.AppSettings["LastKEYValue"] ?? "";
+            UpdateOutputPathState();
 
         }
         
@@ -43,90 +47,281 @@ namespace XXTEADecrypt
             ConfigurationManager.RefreshSection(config.AppSettings.SectionInformation.Name);
         }
 
-        private void button1_Click(object sender, EventArgs e)
+        private bool IsOverwriteOriginalMode()
         {
-            richTextBox_log.AppendText("Start decoding --->" + " 请勿操作 " + "\n");
-            TimeSpan ts1 = new TimeSpan(DateTime.Now.Ticks);
-             
-                    
-            mFileHandle.fileBox.Clear();
-            richTextBox_log.Clear();
-            if (!CheckState()) return;
+            return checkBox_overwriteOriginal.Checked;
+        }
 
-            if (!Directory.Exists(outputPath))
+        private string GetDefaultOutputPath(string currentInputPath)
+        {
+            currentInputPath = (currentInputPath ?? string.Empty).Trim().TrimEnd('\\', '/');
+            if (currentInputPath.Equals(string.Empty))
+            {
+                return string.Empty;
+            }
+
+            if (FileHandle.FileExists(currentInputPath))
+            {
+                string inputDirectory = FileHandle.GetDirectoryName(currentInputPath);
+                return FileHandle.CombinePath(inputDirectory, "out");
+            }
+
+            return FileHandle.CombinePath(currentInputPath, "out");
+        }
+
+        private void SyncOutputPathFromInput()
+        {
+            string currentInputPath = textBox_inputPath.Text.Trim();
+            if (currentInputPath.Equals(string.Empty))
+            {
+                return;
+            }
+
+            textBox_outputPath.Text = IsOverwriteOriginalMode() ? currentInputPath : GetDefaultOutputPath(currentInputPath);
+        }
+
+        private void UpdateOutputPathState()
+        {
+            bool overwriteOriginal = IsOverwriteOriginalMode();
+            textBox_outputPath.Enabled = !overwriteOriginal;
+            button_outputCheck.Enabled = !overwriteOriginal;
+            SyncOutputPathFromInput();
+        }
+
+        private bool EnsureOutputDirectory()
+        {
+            if (IsOverwriteOriginalMode())
+            {
+                return true;
+            }
+
+            if (!FileHandle.DirectoryExists(outputPath))
             {
                 try
                 {
-                    Directory.CreateDirectory(outputPath);
+                    FileHandle.CreateDirectory(outputPath);
                     Console.WriteLine($"Created directory: {outputPath}");
                 }
                 catch (Exception ex)
                 {
                     MessageBox.Show("您的输出目录并不是有效路径!");
                     Console.WriteLine($"An error occurred while creating directory: {ex.Message}");
-                    // 可以根据具体情况进行更详细的错误处理，比如记录日志、通知用户等。
-                    return;
+                    return false;
                 }
             }
+
+            return true;
+        }
+
+        private string GetMappedOutputFilePath(string sourceFile, string sourceRoot)
+        {
+            return IsOverwriteOriginalMode() ? sourceFile : FileHandle.GetOutputPath(sourceFile, sourceRoot, outputPath);
+        }
+
+        private string GetLogDirectory()
+        {
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            return FileHandle.CombinePath(FileHandle.CombinePath(localAppData, "XXTEADecrypt"), "logs");
+        }
+
+        private void BeginDetailLog(string operationName)
+        {
+            logWriteFailed = false;
+            currentLogFilePath = string.Empty;
+
+            try
+            {
+                string logDirectory = GetLogDirectory();
+                FileHandle.CreateDirectory(logDirectory);
+                string logFileName = "XXTEADecrypt_" + operationName + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".log";
+                currentLogFilePath = FileHandle.CombinePath(logDirectory, logFileName);
+                string header = "操作：" + operationName + Environment.NewLine +
+                    "开始时间：" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + Environment.NewLine +
+                    "输入路径：" + inputPath + Environment.NewLine +
+                    "输出路径：" + outputPath + Environment.NewLine +
+                    "覆盖原文件：" + (IsOverwriteOriginalMode() ? "是" : "否") + Environment.NewLine +
+                    "----------------------------------------" + Environment.NewLine;
+                File.WriteAllText(FileHandle.ToLongPath(currentLogFilePath), header, Encoding.UTF8);
+                button_openLog.Enabled = true;
+            }
+            catch (Exception ex)
+            {
+                button_openLog.Enabled = false;
+                richTextBox_log.Text = "日志文件创建失败：" + ex.Message;
+            }
+        }
+
+        public void WriteDetailLog(string message)
+        {
+            if (string.IsNullOrEmpty(currentLogFilePath))
+            {
+                return;
+            }
+
+            try
+            {
+                string line = DateTime.Now.ToString("HH:mm:ss") + " " + message + Environment.NewLine;
+                File.AppendAllText(FileHandle.ToLongPath(currentLogFilePath), line, Encoding.UTF8);
+            }
+            catch (Exception ex)
+            {
+                if (!logWriteFailed)
+                {
+                    logWriteFailed = true;
+                    richTextBox_log.Text = richTextBox_log.Text + Environment.NewLine + "日志写入失败：" + ex.Message;
+                }
+            }
+        }
+
+        private void ShowIdleStatus()
+        {
+            richTextBox_log.Text = "准备就绪。请选择输入路径后开始。";
+        }
+
+        private void ShowScanningStatus(string operationName)
+        {
+            richTextBox_log.Text = operationName + "中..请勿操作... 0%" + Environment.NewLine +
+                "正在扫描文件..." + Environment.NewLine +
+                "详细日志：" + (string.IsNullOrEmpty(currentLogFilePath) ? "未创建" : currentLogFilePath);
+            richTextBox_log.Refresh();
+            Application.DoEvents();
+        }
+
+        private void ShowProgressStatus(string operationName, int completedCount, int totalCount)
+        {
+            int percent = totalCount <= 0 ? 0 : (int)Math.Floor(completedCount * 100.0 / totalCount);
+            if (percent < 0) percent = 0;
+            if (percent > 100) percent = 100;
+
+            richTextBox_log.Text = operationName + "中..请勿操作... " + percent + "%" + Environment.NewLine +
+                "进度：" + completedCount + "/" + totalCount + Environment.NewLine +
+                "详细日志：" + (string.IsNullOrEmpty(currentLogFilePath) ? "未创建" : currentLogFilePath);
+            richTextBox_log.Refresh();
+            Application.DoEvents();
+        }
+
+        private string FormatSpanTime(TimeSpan ts)
+        {
+            return ts.Hours.ToString() + "小时" + ts.Minutes.ToString() + "分" + ts.Seconds.ToString() + "秒";
+        }
+
+        private void ShowFinishedStatus(string operationName, int totalCount, int failedCount, string spanTime)
+        {
+            string summary = failedCount == 0
+                ? "全部完成--->总共" + operationName + "有" + totalCount + "个文件!"
+                : "全部完成--->总共" + operationName + "有" + totalCount + "个文件,其中有" + failedCount + "个文件失败或未处理!";
+
+            richTextBox_log.Text = operationName + "完成 100%" + Environment.NewLine +
+                summary + Environment.NewLine +
+                "耗时：" + spanTime + Environment.NewLine +
+                "详细日志：" + (string.IsNullOrEmpty(currentLogFilePath) ? "未创建" : currentLogFilePath);
+        }
+
+        private void button_openLog_Click(object sender, EventArgs e)
+        {
+            if (string.IsNullOrEmpty(currentLogFilePath) || !FileHandle.FileExists(currentLogFilePath))
+            {
+                MessageBox.Show("暂无可打开的日志文件!");
+                return;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = currentLogFilePath,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("打开日志失败：" + ex.Message);
+            }
+        }
+
+        private void button1_Click(object sender, EventArgs e)
+        {
+            TimeSpan ts1 = new TimeSpan(DateTime.Now.Ticks);
+
+            mFileHandle.fileBox.Clear();
+            if (!CheckState()) return;
+
             Console.WriteLine("输出目录:" + outputPath);
 
-            if (Directory.Exists(inputPath))
+            bool inputIsDirectory = FileHandle.DirectoryExists(inputPath);
+            bool inputIsFile = FileHandle.FileExists(inputPath);
+            if (!inputIsDirectory && !inputIsFile)
+            {
+                MessageBox.Show("您的输入路径不是有效的目录或文件!");
+                return;
+            }
+
+            if (!EnsureOutputDirectory()) return;
+
+            if (inputIsDirectory)
             {
                 Console.WriteLine("输入目录:" + inputPath);
                 if (!CheckFormat()) return;
                 this.Text = "XXTEA解密工具----(解密中...勿操作)";
+                BeginDetailLog("解密");
+                WriteDetailLog("Start decoding ---> 请勿操作");
+                ShowScanningStatus("解密");
                 mFileHandle.DirectoryToFile(inputPath);
-                mForm1.richTextBox_log.AppendText("Total files found --->" + mFileHandle.fileBox.Count + "\nDecrypting... \n\n");
+                WriteDetailLog("Total files found --->" + mFileHandle.fileBox.Count);
             }
-            else if (File.Exists(inputPath))
+            else if (inputIsFile)
             {
-                mFileHandle.FileToDirctory(inputPath); 
+                if (!IsOverwriteOriginalMode())
+                {
+                    mFileHandle.FileToDirctory(inputPath);
+                }
                 Console.WriteLine("输入路径是文件");
                 this.Text = "XXTEA解密工具----(解密中...勿操作)";
-                FileInfo fs = new FileInfo(inputPath);
-                if (DecryptFile(inputPath, inputPath.Replace(fs.Directory.ToString(), outputPath)))
-                {
-                    richTextBox_log.AppendText("解密完成--->" + inputPath.Replace(fs.Directory.ToString(), outputPath) + "\n");
-                }
-                else
-                {
-                    richTextBox_log.AppendText("--->解密失败,该文件不是加密文件或写入文件失败!\n");
-                }
-                richTextBox_log.AppendText("--->解密已全部完成,如有任何疑问或建议请联系作者,支持作者请查看\"关于\"\n");
+                BeginDetailLog("解密");
+                WriteDetailLog("Start decoding ---> 请勿操作");
+                ShowProgressStatus("解密", 0, 1);
+                string inputDirectory = FileHandle.GetDirectoryName(inputPath);
+                string singleOutputPath = GetMappedOutputFilePath(inputPath, inputDirectory);
+                int failedCount = DecryptFile(inputPath, singleOutputPath) ? 0 : 1;
+                ShowProgressStatus("解密", 1, 1);
+                TimeSpan singleTs = new TimeSpan(DateTime.Now.Ticks).Subtract(ts1).Duration();
+                string singleSpanTime = FormatSpanTime(singleTs);
+                WriteDetailLog("--->解密已全部完成共耗时:" + singleSpanTime);
+                ShowFinishedStatus("解密", 1, failedCount, singleSpanTime);
                 this.Text = "XXTEA解密工具----(解密完成)";
                 return;
-            }
-            else {
-                MessageBox.Show("您的输入路径不是有效的目录或文件!");
             }
             //此处开始调用解密函数
             
             int i = 0;
+            int completedCount = 0;
+            ShowProgressStatus("解密", 0, mFileHandle.fileBox.Count);
             foreach (string mInputPath in mFileHandle.fileBox)
             {
-                // Console.WriteLine("-->输出路径:" + mInputPath.Replace(inputPath, outputPath));
-                if (DecryptFile(mInputPath, mInputPath.Replace(inputPath, outputPath)))
+                if (DecryptFile(mInputPath, GetMappedOutputFilePath(mInputPath, inputPath)))
                 {
-                    // richTextBox_log.AppendText("解密完成--->" + mInputPath.Replace(inputPath, outputPath) + "\n");
                 }
                 else
                 {
                     i++;
                 }
+                completedCount++;
+                ShowProgressStatus("解密", completedCount, mFileHandle.fileBox.Count);
             }
             if (i == 0)
             {
-                richTextBox_log.AppendText("全部完成--->总共解密有" + mFileHandle.fileBox.Count + "个文件!\n");
+                WriteDetailLog("全部完成--->总共解密有" + mFileHandle.fileBox.Count + "个文件!");
 
             }
             else {
-                richTextBox_log.AppendText("全部完成--->总共解密有" + mFileHandle.fileBox.Count + "个文件,其中有" + i + "个文件没有加密或解密失败!\n");
+                WriteDetailLog("全部完成--->总共解密有" + mFileHandle.fileBox.Count + "个文件,其中有" + i + "个文件没有加密或解密失败!");
             }
             TimeSpan ts2 = new TimeSpan(DateTime.Now.Ticks);
             TimeSpan ts = ts2.Subtract(ts1).Duration(); //时间差的绝对值 
-            string spanTime = ts.Hours.ToString() + "小时" + ts.Minutes.ToString() + "分" + ts.Seconds.ToString() + "秒"; //以X小时X分X秒的格式现实执行时间 
+            string spanTime = FormatSpanTime(ts); //以X小时X分X秒的格式现实执行时间
 
-            richTextBox_log.AppendText("--->解密已全部完成共耗时:"+ spanTime + ",如有任何疑问或建议请联系作者,支持作者请查看\"关于\"\n");
+            WriteDetailLog("--->解密已全部完成共耗时:" + spanTime + ",如有任何疑问或建议请联系作者,支持作者请查看\"关于\"");
+            ShowFinishedStatus("解密", mFileHandle.fileBox.Count, i, spanTime);
             this.Text = "XXTEA解密工具----(解密完成)";
             
 
@@ -135,8 +330,11 @@ namespace XXTEADecrypt
         private void textBox_DeDragDrop(object sender, DragEventArgs e)
         {
             textBox_inputPath.Text = ((System.Array)e.Data.GetData(DataFormats.FileDrop)).GetValue(0).ToString();
-            string[] parts = textBox_inputPath.Text.Split('\\');
-            textBox_outputPath.Text = string.Join("\\", parts.Take(parts.Length - 1).Concat(new string[] { "out", parts[parts.Length - 1] }));
+        }
+
+        private void textBox_inputPath_TextChanged(object sender, EventArgs e)
+        {
+            SyncOutputPathFromInput();
         }
 
         private void textBox_DeDragEnter(object sender, DragEventArgs e)
@@ -149,7 +347,10 @@ namespace XXTEADecrypt
 
         private void textBox_enDragDrop(object sender, DragEventArgs e)
         {
-            textBox_outputPath.Text = ((System.Array)e.Data.GetData(DataFormats.FileDrop)).GetValue(0).ToString();
+            if (!IsOverwriteOriginalMode())
+            {
+                textBox_outputPath.Text = ((System.Array)e.Data.GetData(DataFormats.FileDrop)).GetValue(0).ToString();
+            }
         }
 
         private void textBox_enDragEnter(object sender, DragEventArgs e)
@@ -157,7 +358,7 @@ namespace XXTEADecrypt
             if (e.Data.GetDataPresent(DataFormats.FileDrop))
             {
                 string str = ((System.Array)e.Data.GetData(DataFormats.FileDrop)).GetValue(0).ToString();
-                if (Directory.Exists(str))
+                if (FileHandle.DirectoryExists(str))
                 {
                     e.Effect = DragDropEffects.Link;
                 }
@@ -166,6 +367,11 @@ namespace XXTEADecrypt
 
         private void button3_Click(object sender, EventArgs e)
         {
+            if (IsOverwriteOriginalMode())
+            {
+                return;
+            }
+
             FolderBrowserDialog fbd = new FolderBrowserDialog();
             fbd.ShowDialog();
             if (!fbd.SelectedPath.Equals(""))
@@ -188,85 +394,86 @@ namespace XXTEADecrypt
         private void button_encrypt_Click(object sender, EventArgs e)
         {
             TimeSpan ts1 = new TimeSpan(DateTime.Now.Ticks);
-            
-           
+
             mFileHandle.fileBox.Clear();
-            richTextBox_log.Clear();
             if (!CheckState()) return;
 
-            if (!Directory.Exists(outputPath))
-            {
-                try
-                {
-                    Directory.CreateDirectory(outputPath);
-                    Console.WriteLine($"Created directory: {outputPath}");
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show("您的输出目录并不是有效路径!");
-                    Console.WriteLine($"An error occurred while creating directory: {ex.Message}");
-                    // 可以根据具体情况进行更详细的错误处理，比如记录日志、通知用户等。
-                    return;
-                }
-                
-            }
             Console.WriteLine("输出目录:" + outputPath);
 
-            if (Directory.Exists(inputPath))
+            bool inputIsDirectory = FileHandle.DirectoryExists(inputPath);
+            bool inputIsFile = FileHandle.FileExists(inputPath);
+            if (!inputIsDirectory && !inputIsFile)
+            {
+                MessageBox.Show("您的输入路径不是有效的目录或文件!");
+                return;
+            }
+
+            if (!EnsureOutputDirectory()) return;
+
+            if (inputIsDirectory)
             {
                 Console.WriteLine("输入目录:" + inputPath);
                 if (!CheckFormat()) return;
                 this.Text = "XXTEA解密工具----(加密中...勿操作)";
+                BeginDetailLog("加密");
+                WriteDetailLog("Start encoding ---> 请勿操作");
+                ShowScanningStatus("加密");
                 mFileHandle.DirectoryToFile(inputPath);
+                WriteDetailLog("Total files found --->" + mFileHandle.fileBox.Count);
             }
-            else if (File.Exists(inputPath))
+            else if (inputIsFile)
             {
-                mFileHandle.FileToDirctory(inputPath);
+                if (!IsOverwriteOriginalMode())
+                {
+                    mFileHandle.FileToDirctory(inputPath);
+                }
                 Console.WriteLine("输入路径是文件");
                 this.Text = "XXTEA解密工具----(加密中...勿操作)";
-                FileInfo fs = new FileInfo(inputPath);
-                if (EncryptFile(inputPath, inputPath.Replace(fs.Directory.ToString(), outputPath)))
-                {
-                    richTextBox_log.AppendText("加密完成--->" + inputPath.Replace(fs.Directory.ToString(), outputPath) + "\n");
-                }
-                else
-                {
-                    richTextBox_log.AppendText("--->加密失败,可能写入文件失败!\n");
-                }
-                richTextBox_log.AppendText("--->加密已全部完成,如有任何疑问或建议请联系作者,支持作者请查看\"关于\"!\n");
+                BeginDetailLog("加密");
+                WriteDetailLog("Start encoding ---> 请勿操作");
+                ShowProgressStatus("加密", 0, 1);
+                string inputDirectory = FileHandle.GetDirectoryName(inputPath);
+                string singleOutputPath = GetMappedOutputFilePath(inputPath, inputDirectory);
+                int failedCount = EncryptFile(inputPath, singleOutputPath) ? 0 : 1;
+                ShowProgressStatus("加密", 1, 1);
+                TimeSpan singleTs = new TimeSpan(DateTime.Now.Ticks).Subtract(ts1).Duration();
+                string singleSpanTime = FormatSpanTime(singleTs);
+                WriteDetailLog("--->加密已全部完成共耗时" + singleSpanTime);
+                ShowFinishedStatus("加密", 1, failedCount, singleSpanTime);
                 this.Text = "XXTEA解密工具----(加密完成)";
                 return;
-            }
-            else
-            {
-                MessageBox.Show("您的输入路径不是有效的目录或文件!");
             }
             //此处开始调用加密函数
             
             int i = 0;
+            int completedCount = 0;
+            ShowProgressStatus("加密", 0, mFileHandle.fileBox.Count);
             foreach (string mInputPath in mFileHandle.fileBox)
             {
-                Console.WriteLine("-->输出路径:" + mInputPath.Replace(inputPath, outputPath));
-                if (EncryptFile(mInputPath, mInputPath.Replace(inputPath, outputPath)))
+                string mappedOutputPath = GetMappedOutputFilePath(mInputPath, inputPath);
+                Console.WriteLine("-->输出路径:" + mappedOutputPath);
+                if (EncryptFile(mInputPath, mappedOutputPath))
                 {
-                    richTextBox_log.AppendText("加密完成--->" + mInputPath.Replace(inputPath, outputPath) + "\n");
                 }
                 else
                 {
                     i++;
                 }
+                completedCount++;
+                ShowProgressStatus("加密", completedCount, mFileHandle.fileBox.Count);
             }
             if (i == 0)
             {
-                richTextBox_log.AppendText("全部完成--->总共加密有" + mFileHandle.fileBox.Count + "个文件!\n");
+                WriteDetailLog("全部完成--->总共加密有" + mFileHandle.fileBox.Count + "个文件!");
             }
             else {
-                richTextBox_log.AppendText("全部完成--->总共加密有" + mFileHandle.fileBox.Count + "个文件,其中有" + i + "个文件加密失败!\n");
+                WriteDetailLog("全部完成--->总共加密有" + mFileHandle.fileBox.Count + "个文件,其中有" + i + "个文件加密失败!");
             }
             TimeSpan ts2 = new TimeSpan(DateTime.Now.Ticks);
             TimeSpan ts = ts2.Subtract(ts1).Duration(); //时间差的绝对值 
-            string spanTime = ts.Hours.ToString() + "小时" + ts.Minutes.ToString() + "分" + ts.Seconds.ToString() + "秒"; //以X小时X分X秒的格式现实执行时间 
-            richTextBox_log.AppendText("--->加密已全部完成共耗时" + spanTime + ",如有任何疑问或建议请联系作者,支持作者请查看\"关于\"!\n");
+            string spanTime = FormatSpanTime(ts); //以X小时X分X秒的格式现实执行时间
+            WriteDetailLog("--->加密已全部完成共耗时" + spanTime + ",如有任何疑问或建议请联系作者,支持作者请查看\"关于\"!");
+            ShowFinishedStatus("加密", mFileHandle.fileBox.Count, i, spanTime);
             this.Text = "XXTEA解密工具----(加密完成)";
             
         }
@@ -294,29 +501,38 @@ namespace XXTEADecrypt
 
         private void Form1_Load(object sender, EventArgs e)
         {
-            string str = "---欢迎使用该工具，初次使用请查看帮助，有任何疑问和建议可以联系作者，申明本工具完全免费使用，请不要用于商业用途！任何非法和损害他人利益行为与作者无关!\n";
-            richTextBox_log.AppendText(str);
-            
+            button_openLog.Enabled = false;
+            ShowIdleStatus();
         }
         private bool DecryptFile(string inputFile, string outputFile)
         {
             if (luacToluaCB.Checked)
             {
-                if (Path.GetExtension(outputFile) == ".luac")
+                if (FileHandle.GetExtension(outputFile) == ".luac")
                 {
-                    outputFile = Path.ChangeExtension(outputFile, ".lua");
+                    outputFile = FileHandle.ChangeExtension(outputFile, ".lua");
                 }
             }
             byte[] srcData = mFileHandle.FileRead(inputFile);  
             byte[] tmp = new byte[XXTEA_sign.Length];
-            if (srcData.Length < XXTEA_sign.Length) return false;
+            if (srcData.Length < XXTEA_sign.Length)
+            {
+                WriteDetailLog("无法解密，文件长度小于签名--->" + inputFile);
+                return false;
+            }
             Array.Copy(srcData, tmp, XXTEA_sign.Length);
             for (int i = 0; i < XXTEA_sign.Length; i++)
             {
                 if (tmp[i] != XXTEA_sign[i])
                 {
-                    File.Copy(inputFile, outputFile, true); // 强制覆盖
-                    richTextBox_log.AppendText("无法解密，已复制原始文件--->" + inputFile + "\n");
+                    if (IsOverwriteOriginalMode())
+                    {
+                        WriteDetailLog("无法解密，原文件未更改--->" + inputFile);
+                        return false;
+                    }
+
+                    FileHandle.CopyFile(inputFile, outputFile, true); // 强制覆盖
+                    WriteDetailLog("无法解密，已复制原始文件--->" + inputFile);
                     return false;
                 }
             }
@@ -328,17 +544,21 @@ namespace XXTEADecrypt
             byte[] data2 = mXXTEAHelp.xxtea_decrypt(data, (uint)len, XXTEA_KEY, (uint)XXTEA_KEY.Length, out ret_length);
             if (data2 == null)
             {
-                MessageBox.Show("解密失败. 捡查加密信息.");
+                WriteDetailLog("解密失败，检查加密信息--->" + inputFile);
                 return false; 
             }
             
             if (data2.Length < 10)
             {
-                richTextBox_log.AppendText("Decode Failed--->" + inputFile + "\n");
+                WriteDetailLog("Decode Failed--->" + inputFile);
             }
             else
             {
-                if (mFileHandle.FileWrite(data2, outputFile)) return true;
+                if (mFileHandle.FileWrite(data2, outputFile))
+                {
+                    WriteDetailLog("解密完成--->" + outputFile);
+                    return true;
+                }
             }
             return false; 
         }
@@ -364,7 +584,11 @@ namespace XXTEADecrypt
             byte[] data2 = new byte[data.Length + XXTEA_sign.Length];
             Buffer.BlockCopy(XXTEA_sign, 0, data2, 0, XXTEA_sign.Length);
             Buffer.BlockCopy(data, 0, data2, XXTEA_sign.Length, data.Length);
-            if (mFileHandle.FileWrite(data2, outputFile)) return true;
+            if (mFileHandle.FileWrite(data2, outputFile))
+            {
+                WriteDetailLog("加密完成--->" + outputFile);
+                return true;
+            }
             return false;
         }
 
@@ -377,6 +601,11 @@ namespace XXTEADecrypt
         private void luacToluaCB_CheckedChanged(object sender, EventArgs e)
         {
 
+        }
+
+        private void checkBox_overwriteOriginal_CheckedChanged(object sender, EventArgs e)
+        {
+            UpdateOutputPathState();
         }
 
         /// <summary>
@@ -404,12 +633,20 @@ namespace XXTEADecrypt
             }
             inputPath = textBox_inputPath.Text;
             mFileHandle.inputPath = inputPath;
-            if (textBox_outputPath.Text.Equals(""))
+            if (IsOverwriteOriginalMode())
+            {
+                outputPath = inputPath;
+                textBox_outputPath.Text = inputPath;
+            }
+            else if (textBox_outputPath.Text.Equals(""))
             {
                 MessageBox.Show("输出路径为空,请重新输入!");
                 return false;
             }
-            outputPath = textBox_outputPath.Text;
+            else
+            {
+                outputPath = textBox_outputPath.Text;
+            }
             mFileHandle.outputPath = outputPath;         
             return true;
         }

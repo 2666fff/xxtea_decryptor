@@ -58,6 +58,8 @@
             this.richTextBox_log = new System.Windows.Forms.RichTextBox();
             this.label5 = new System.Windows.Forms.Label();
             this.luacToluaCB = new System.Windows.Forms.CheckBox();
+            this.checkBox_overwriteOriginal = new System.Windows.Forms.CheckBox();
+            this.button_openLog = new System.Windows.Forms.Button();
             this.menuStrip1.SuspendLayout();
             this.SuspendLayout();
             // 
@@ -136,6 +138,7 @@
             this.textBox_inputPath.TabIndex = 6;
             this.textBox_inputPath.DragDrop += new System.Windows.Forms.DragEventHandler(this.textBox_DeDragDrop);
             this.textBox_inputPath.DragEnter += new System.Windows.Forms.DragEventHandler(this.textBox_DeDragEnter);
+            this.textBox_inputPath.TextChanged += new System.EventHandler(this.textBox_inputPath_TextChanged);
             // 
             // checkBox_lua
             // 
@@ -345,7 +348,7 @@
             this.label2.Name = "label2";
             this.label2.Size = new System.Drawing.Size(109, 20);
             this.label2.TabIndex = 23;
-            this.label2.Text = "输出日志：";
+            this.label2.Text = "运行状态：";
             // 
             // richTextBox_log
             // 
@@ -384,6 +387,32 @@
             this.luacToluaCB.Text = "Rename luac to lua";
             this.luacToluaCB.UseVisualStyleBackColor = true;
             this.luacToluaCB.CheckedChanged += new System.EventHandler(this.luacToluaCB_CheckedChanged);
+            //
+            // checkBox_overwriteOriginal
+            //
+            this.checkBox_overwriteOriginal.AutoSize = true;
+            this.checkBox_overwriteOriginal.Font = new System.Drawing.Font("SimSun", 9.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            this.checkBox_overwriteOriginal.Location = new System.Drawing.Point(563, 99);
+            this.checkBox_overwriteOriginal.Margin = new System.Windows.Forms.Padding(4);
+            this.checkBox_overwriteOriginal.Name = "checkBox_overwriteOriginal";
+            this.checkBox_overwriteOriginal.Size = new System.Drawing.Size(151, 24);
+            this.checkBox_overwriteOriginal.TabIndex = 27;
+            this.checkBox_overwriteOriginal.Text = "覆盖原文件";
+            this.checkBox_overwriteOriginal.UseVisualStyleBackColor = true;
+            this.checkBox_overwriteOriginal.CheckedChanged += new System.EventHandler(this.checkBox_overwriteOriginal_CheckedChanged);
+            //
+            // button_openLog
+            //
+            this.button_openLog.Enabled = false;
+            this.button_openLog.Font = new System.Drawing.Font("SimSun", 9.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            this.button_openLog.Location = new System.Drawing.Point(14, 504);
+            this.button_openLog.Margin = new System.Windows.Forms.Padding(4);
+            this.button_openLog.Name = "button_openLog";
+            this.button_openLog.Size = new System.Drawing.Size(98, 38);
+            this.button_openLog.TabIndex = 28;
+            this.button_openLog.Text = "日志";
+            this.button_openLog.UseVisualStyleBackColor = true;
+            this.button_openLog.Click += new System.EventHandler(this.button_openLog_Click);
             // 
             // Form1
             // 
@@ -391,6 +420,8 @@
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi;
             this.BackColor = System.Drawing.SystemColors.Control;
             this.ClientSize = new System.Drawing.Size(808, 908);
+            this.Controls.Add(this.button_openLog);
+            this.Controls.Add(this.checkBox_overwriteOriginal);
             this.Controls.Add(this.luacToluaCB);
             this.Controls.Add(this.label5);
             this.Controls.Add(this.menuStrip1);
@@ -459,6 +490,8 @@
         private System.Windows.Forms.ToolStripMenuItem 关于ToolStripMenuItem;
         private System.Windows.Forms.Label label5;
         private System.Windows.Forms.CheckBox luacToluaCB;
+        private System.Windows.Forms.CheckBox checkBox_overwriteOriginal;
+        private System.Windows.Forms.Button button_openLog;
     }
 }
 
