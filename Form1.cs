@@ -100,12 +100,12 @@ namespace XXTEADecrypt
                 try
                 {
                     FileHandle.CreateDirectory(outputPath);
-                    Console.WriteLine($"Created directory: {outputPath}");
+                    Console.WriteLine("Created directory: " + outputPath);
                 }
                 catch (Exception ex)
                 {
                     MessageBox.Show("您的输出目录并不是有效路径!");
-                    Console.WriteLine($"An error occurred while creating directory: {ex.Message}");
+                    Console.WriteLine("An error occurred while creating directory: " + ex.Message);
                     return false;
                 }
             }
@@ -116,6 +116,36 @@ namespace XXTEADecrypt
         private string GetMappedOutputFilePath(string sourceFile, string sourceRoot)
         {
             return IsOverwriteOriginalMode() ? sourceFile : FileHandle.GetOutputPath(sourceFile, sourceRoot, outputPath);
+        }
+
+        private bool ShouldRenameLuacToLua(string path)
+        {
+            return luacToluaCB.Checked &&
+                FileHandle.GetExtension(path).Equals(".luac", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool DeleteInputFileAfterLuacRename(string inputFile, string outputFile, bool shouldDelete)
+        {
+            if (!shouldDelete || FileHandle.IsSamePath(inputFile, outputFile))
+            {
+                return true;
+            }
+
+            try
+            {
+                if (FileHandle.FileExists(inputFile))
+                {
+                    File.Delete(FileHandle.ToLongPath(inputFile));
+                    WriteDetailLog("已删除原 luac 文件--->" + inputFile);
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                WriteDetailLog("删除原 luac 文件失败--->" + inputFile + "，原因：" + ex.Message);
+                return false;
+            }
         }
 
         private string GetLogDirectory()
@@ -506,12 +536,10 @@ namespace XXTEADecrypt
         }
         private bool DecryptFile(string inputFile, string outputFile)
         {
-            if (luacToluaCB.Checked)
+            bool deleteInputAfterLuacRename = IsOverwriteOriginalMode() && ShouldRenameLuacToLua(outputFile);
+            if (ShouldRenameLuacToLua(outputFile))
             {
-                if (FileHandle.GetExtension(outputFile) == ".luac")
-                {
-                    outputFile = FileHandle.ChangeExtension(outputFile, ".lua");
-                }
+                outputFile = FileHandle.ChangeExtension(outputFile, ".lua");
             }
             byte[] srcData = mFileHandle.FileRead(inputFile);  
             byte[] tmp = new byte[XXTEA_sign.Length];
@@ -557,7 +585,7 @@ namespace XXTEADecrypt
                 if (mFileHandle.FileWrite(data2, outputFile))
                 {
                     WriteDetailLog("解密完成--->" + outputFile);
-                    return true;
+                    return DeleteInputFileAfterLuacRename(inputFile, outputFile, deleteInputAfterLuacRename);
                 }
             }
             return false; 

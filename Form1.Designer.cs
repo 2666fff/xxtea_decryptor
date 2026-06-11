@@ -391,6 +391,8 @@
             // checkBox_overwriteOriginal
             //
             this.checkBox_overwriteOriginal.AutoSize = true;
+            this.checkBox_overwriteOriginal.Checked = true;
+            this.checkBox_overwriteOriginal.CheckState = System.Windows.Forms.CheckState.Checked;
             this.checkBox_overwriteOriginal.Font = new System.Drawing.Font("SimSun", 9.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.checkBox_overwriteOriginal.Location = new System.Drawing.Point(563, 99);
             this.checkBox_overwriteOriginal.Margin = new System.Windows.Forms.Padding(4);
