@@ -4,10 +4,17 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   pull_request:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Existing tag to build and publish, for example v1.0.1'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -16,21 +23,103 @@ jobs:
   build:
     name: Build Release
     runs-on: windows-2022
+    permissions:
+      contents: write
+    env:
+      CONFIGURATION: Release
+      PLATFORM: Any CPU
+      REF_ASSEMBLIES_VERSION: 1.0.3
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || (github.ref_type == 'tag' && github.ref_name) || '' }}
+      SOLUTION_FILE: XXTEADecrypt.sln
 
     steps:
-      - name: Checkout
+      - name: Checkout requested tag
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name != '' }}
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag_name }}
+
+      - name: Checkout
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.tag_name == '' }}
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v3
 
-      - name: Build
-        run: msbuild XXTEADecrypt.sln /p:Configuration=Release /p:Platform="Any CPU" /m /restore
+      - name: Install .NET Framework 4.5.2 reference assemblies
+        run: |
+          nuget install Microsoft.NETFramework.ReferenceAssemblies.net452 `
+            -Version $env:REF_ASSEMBLIES_VERSION `
+            -OutputDirectory packages `
+            -NonInteractive
 
-      - name: Upload Release artifact
-        uses: actions/upload-artifact@v7
+      - name: Build
+        run: |
+          msbuild $env:SOLUTION_FILE `
+            /p:Configuration=$env:CONFIGURATION `
+            /p:Platform="$env:PLATFORM" `
+            /p:TargetFrameworkRootPath="$PWD\packages\Microsoft.NETFramework.ReferenceAssemblies.net452.$env:REF_ASSEMBLIES_VERSION\build" `
+            /m `
+            /restore
+
+      - name: Package
+        id: package
+        run: |
+          $version = $env:RELEASE_TAG
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            $version = $env:GITHUB_SHA.Substring(0, 7)
+          }
+
+          $artifactRoot = Join-Path $PWD 'artifacts'
+          $stagingDir = Join-Path $artifactRoot 'XXTEADecrypt'
+          $zipPath = Join-Path $artifactRoot "XXTEADecrypt-$version-windows.zip"
+
+          if (Test-Path -LiteralPath $artifactRoot) {
+            Remove-Item -LiteralPath $artifactRoot -Recurse -Force
+          }
+
+          New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
+          Get-ChildItem -Path (Join-Path $PWD 'bin\Release') -Force |
+            Where-Object { $_.Name -ne 'app.publish' } |
+            Copy-Item -Destination $stagingDir -Recurse -Force
+          Get-ChildItem -Path $stagingDir -Recurse -Include *.pdb -File | Remove-Item -Force
+          Compress-Archive -Path (Join-Path $stagingDir '*') -DestinationPath $zipPath -Force
+
+          "zip_name=$(Split-Path $zipPath -Leaf)" >> $env:GITHUB_OUTPUT
+          "zip_path=$zipPath" >> $env:GITHUB_OUTPUT
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v6
         with:
-          name: XXTEADecrypt-Release
-          path: |
-            bin/Release/**
+          name: ${{ steps.package.outputs.zip_name }}
+          path: ${{ steps.package.outputs.zip_path }}
           if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: ${{ env.RELEASE_TAG != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          $asset = '${{ steps.package.outputs.zip_path }}'
+
+          if (-not (Test-Path -LiteralPath $asset)) {
+            throw "Release asset not found: $asset"
+          }
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $asset --clobber
+          } else {
+            gh release create $tag $asset --title "XXTEADecrypt $tag" --generate-notes
+          }
+
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
