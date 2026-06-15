@@ -3,6 +3,7 @@ using System.Configuration;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Windows.Forms;
 
@@ -32,6 +33,11 @@ namespace XXTEADecrypt
             this.Closing += Form1_Closing;
             textBox_sign.Text = ConfigurationManager.AppSettings["LastSignValue"] ?? "";
             textBox_KEY.Text = ConfigurationManager.AppSettings["LastKEYValue"] ?? "";
+            bool compressImagesToWebP;
+            if (bool.TryParse(ConfigurationManager.AppSettings["CompressImagesToWebP"], out compressImagesToWebP))
+            {
+                checkBox_compressWebP.Checked = compressImagesToWebP;
+            }
             UpdateOutputPathState();
 
         }
@@ -43,8 +49,21 @@ namespace XXTEADecrypt
             config.AppSettings.Settings["WindowTop"].Value = Top.ToString();
             config.AppSettings.Settings["LastSignValue"].Value = textBox_sign.Text;
             config.AppSettings.Settings["LastKEYValue"].Value = textBox_KEY.Text;
+            EnsureAppSetting(config, "CompressImagesToWebP").Value = checkBox_compressWebP.Checked.ToString();
             config.Save(ConfigurationSaveMode.Modified);
             ConfigurationManager.RefreshSection(config.AppSettings.SectionInformation.Name);
+        }
+
+        private KeyValueConfigurationElement EnsureAppSetting(Configuration config, string key)
+        {
+            KeyValueConfigurationElement setting = config.AppSettings.Settings[key];
+            if (setting == null)
+            {
+                config.AppSettings.Settings.Add(key, string.Empty);
+                setting = config.AppSettings.Settings[key];
+            }
+
+            return setting;
         }
 
         private bool IsOverwriteOriginalMode()
@@ -124,6 +143,11 @@ namespace XXTEADecrypt
                 FileHandle.GetExtension(path).Equals(".luac", StringComparison.OrdinalIgnoreCase);
         }
 
+        private bool ShouldCompressImagesToWebP()
+        {
+            return checkBox_compressWebP.Checked;
+        }
+
         private bool DeleteInputFileAfterLuacRename(string inputFile, string outputFile, bool shouldDelete)
         {
             if (!shouldDelete || FileHandle.IsSamePath(inputFile, outputFile))
@@ -154,6 +178,178 @@ namespace XXTEADecrypt
             return FileHandle.CombinePath(FileHandle.CombinePath(localAppData, "XXTEADecrypt"), "logs");
         }
 
+        private string GetWebPToolPath()
+        {
+            string baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
+            string outputToolPath = Path.Combine(baseDirectory, "Tools", "convert_smaller_webp.py");
+            if (File.Exists(outputToolPath))
+            {
+                return outputToolPath;
+            }
+
+            string sourceToolPath = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "Tools", "convert_smaller_webp.py");
+            if (File.Exists(sourceToolPath))
+            {
+                return sourceToolPath;
+            }
+
+            string workingDirectoryToolPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "convert_smaller_webp.py");
+            return File.Exists(workingDirectoryToolPath) ? workingDirectoryToolPath : outputToolPath;
+        }
+
+        private bool TryCompressImageToWebPIfSmaller(string outputFile)
+        {
+            if (!ShouldCompressImagesToWebP())
+            {
+                return true;
+            }
+
+            if (string.IsNullOrEmpty(outputFile) || !FileHandle.FileExists(outputFile))
+            {
+                return true;
+            }
+
+            if (!ShouldAttemptWebPCompression(outputFile))
+            {
+                return true;
+            }
+
+            string toolPath = GetWebPToolPath();
+            if (!File.Exists(toolPath))
+            {
+                WriteDetailLog("图片转WebP压缩失败，未找到工具脚本--->" + toolPath);
+                return false;
+            }
+
+            try
+            {
+                ProcessStartInfo startInfo = new ProcessStartInfo();
+                startInfo.FileName = "python";
+                startInfo.Arguments = QuoteArgument(toolPath) + " " + QuoteArgument(outputFile) + " --quality 85";
+                startInfo.UseShellExecute = false;
+                startInfo.CreateNoWindow = true;
+                startInfo.RedirectStandardOutput = true;
+                startInfo.RedirectStandardError = true;
+
+                using (Process process = Process.Start(startInfo))
+                {
+                    string stdout = process.StandardOutput.ReadToEnd().Trim();
+                    string stderr = process.StandardError.ReadToEnd().Trim();
+                    process.WaitForExit();
+
+                    if (process.ExitCode != 0)
+                    {
+                        WriteDetailLog("图片转WebP压缩失败--->" + outputFile + "，原因：" + GetProcessMessage(stdout, stderr));
+                        return false;
+                    }
+
+                    WriteWebPCompressionLog(outputFile, stdout);
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteDetailLog("图片转WebP压缩异常--->" + outputFile + "，原因：" + ex.Message);
+                return false;
+            }
+        }
+
+        private bool ShouldAttemptWebPCompression(string outputFile)
+        {
+            byte[] header = ReadFileHeader(outputFile, 16);
+            if (header.Length == 0)
+            {
+                return false;
+            }
+
+            if (HasAsciiAt(header, 0, "RIFF") && HasAsciiAt(header, 8, "WEBP"))
+            {
+                WriteDetailLog("图片已是WebP内容，跳过压缩--->" + outputFile);
+                return false;
+            }
+
+            return IsUnencryptedImageFile(header);
+        }
+
+        private byte[] ReadFileHeader(string path, int length)
+        {
+            try
+            {
+                using (FileStream stream = new FileStream(FileHandle.ToLongPath(path), FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    int count = (int)Math.Min(length, stream.Length);
+                    byte[] buffer = new byte[count];
+                    int read = stream.Read(buffer, 0, count);
+                    if (read == count)
+                    {
+                        return buffer;
+                    }
+
+                    byte[] trimmed = new byte[read];
+                    Buffer.BlockCopy(buffer, 0, trimmed, 0, read);
+                    return trimmed;
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteDetailLog("读取图片文件头失败，跳过WebP压缩--->" + path + "，原因：" + ex.Message);
+                return new byte[0];
+            }
+        }
+
+        private string QuoteArgument(string argument)
+        {
+            if (argument == null)
+            {
+                return "\"\"";
+            }
+
+            return "\"" + argument.Replace("\"", "\\\"") + "\"";
+        }
+
+        private string GetProcessMessage(string stdout, string stderr)
+        {
+            if (!string.IsNullOrEmpty(stderr))
+            {
+                return stderr;
+            }
+
+            return string.IsNullOrEmpty(stdout) ? "未知错误" : stdout;
+        }
+
+        private void WriteWebPCompressionLog(string outputFile, string output)
+        {
+            if (string.IsNullOrEmpty(output))
+            {
+                return;
+            }
+
+            if (output.StartsWith("converted ", StringComparison.OrdinalIgnoreCase))
+            {
+                WriteDetailLog("图片已转WebP压缩--->" + outputFile + " (" + output + ")");
+            }
+            else if (output.StartsWith("kept_not_smaller", StringComparison.OrdinalIgnoreCase))
+            {
+                WriteDetailLog("图片转WebP后不更小，保留原文件--->" + outputFile + " (" + output + ")");
+            }
+            else if (output.StartsWith("skipped already_webp", StringComparison.OrdinalIgnoreCase))
+            {
+                WriteDetailLog("图片已是WebP内容，跳过压缩--->" + outputFile);
+            }
+            else if (output.StartsWith("skipped non_image", StringComparison.OrdinalIgnoreCase))
+            {
+                WriteDetailLog("非图片文件，跳过WebP压缩--->" + outputFile);
+            }
+            else if (output.StartsWith("skipped animated", StringComparison.OrdinalIgnoreCase))
+            {
+                WriteDetailLog("动图文件，跳过WebP压缩--->" + outputFile);
+            }
+            else
+            {
+                WriteDetailLog("图片转WebP压缩结果--->" + outputFile + "：" + output);
+            }
+        }
+
         private void BeginDetailLog(string operationName)
         {
             logWriteFailed = false;
@@ -170,6 +366,7 @@ namespace XXTEADecrypt
                     "输入路径：" + inputPath + Environment.NewLine +
                     "输出路径：" + outputPath + Environment.NewLine +
                     "覆盖原文件：" + (IsOverwriteOriginalMode() ? "是" : "否") + Environment.NewLine +
+                    "图片转WebP压缩：" + (ShouldCompressImagesToWebP() ? "是" : "否") + Environment.NewLine +
                     "----------------------------------------" + Environment.NewLine;
                 File.WriteAllText(FileHandle.ToLongPath(currentLogFilePath), header, Encoding.UTF8);
                 button_openLog.Enabled = true;
@@ -534,6 +731,331 @@ namespace XXTEADecrypt
             button_openLog.Enabled = false;
             ShowIdleStatus();
         }
+
+        private bool TryMarkUnencryptedRegularFileAsDecrypted(string inputFile, string outputFile, byte[] srcData, bool deleteInputAfterLuacRename)
+        {
+            string fileType = GetUnencryptedRegularFileType(inputFile, srcData);
+            if (string.IsNullOrEmpty(fileType))
+            {
+                return false;
+            }
+
+            try
+            {
+                FileHandle.CopyFile(inputFile, outputFile, true);
+            }
+            catch (Exception ex)
+            {
+                WriteDetailLog("未加密" + fileType + "文件复制失败--->" + outputFile + "，原因：" + ex.Message);
+                return false;
+            }
+
+            WriteDetailLog("未加密" + fileType + "文件，已按已解密处理--->" + outputFile);
+            bool compressed = TryCompressImageToWebPIfSmaller(outputFile);
+            bool deletedInput = DeleteInputFileAfterLuacRename(inputFile, outputFile, deleteInputAfterLuacRename);
+            return compressed && deletedInput;
+        }
+
+        private string GetUnencryptedRegularFileType(string inputFile, byte[] data)
+        {
+            if (data == null)
+            {
+                return string.Empty;
+            }
+
+            if (IsUnencryptedImageFile(data))
+            {
+                return "图片";
+            }
+
+            if (IsUnencryptedMp3File(inputFile, data))
+            {
+                return "MP3";
+            }
+
+            if (IsUnencryptedMp4File(data))
+            {
+                return "MP4";
+            }
+
+            if (IsUnencryptedWavFile(data))
+            {
+                return "WAV";
+            }
+
+            if (IsLikelyTextFile(inputFile, data))
+            {
+                return "文本";
+            }
+
+            return string.Empty;
+        }
+
+        private bool IsUnencryptedImageFile(byte[] data)
+        {
+            return HasByteSequence(data, 0, new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }) ||
+                HasByteSequence(data, 0, new byte[] { 0xFF, 0xD8, 0xFF }) ||
+                HasAsciiAt(data, 0, "GIF87a") ||
+                HasAsciiAt(data, 0, "GIF89a") ||
+                HasAsciiAt(data, 0, "BM") ||
+                (HasAsciiAt(data, 0, "RIFF") && HasAsciiAt(data, 8, "WEBP")) ||
+                HasByteSequence(data, 0, new byte[] { 0x49, 0x49, 0x2A, 0x00 }) ||
+                HasByteSequence(data, 0, new byte[] { 0x4D, 0x4D, 0x00, 0x2A }) ||
+                HasByteSequence(data, 0, new byte[] { 0x00, 0x00, 0x01, 0x00 }) ||
+                HasAsciiAt(data, 0, "DDS ");
+        }
+
+        private bool IsUnencryptedMp3File(string inputFile, byte[] data)
+        {
+            if (HasAsciiAt(data, 0, "ID3"))
+            {
+                return true;
+            }
+
+            string extension = FileHandle.GetExtension(inputFile);
+            return data.Length >= 2 &&
+                data[0] == 0xFF &&
+                (data[1] & 0xE0) == 0xE0 &&
+                extension.Equals(".mp3", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsUnencryptedMp4File(byte[] data)
+        {
+            return HasAsciiAt(data, 4, "ftyp");
+        }
+
+        private bool IsUnencryptedWavFile(byte[] data)
+        {
+            return HasAsciiAt(data, 0, "RIFF") && HasAsciiAt(data, 8, "WAVE");
+        }
+
+        private bool IsLikelyTextFile(string inputFile, byte[] data)
+        {
+            if (data.Length == 0)
+            {
+                return true;
+            }
+
+            if (IsLikelyUtf16Text(data))
+            {
+                return true;
+            }
+
+            if (HasZeroByte(data) || HasBinaryControlByte(data))
+            {
+                return false;
+            }
+
+            if (IsStrictUtf8Text(data))
+            {
+                return true;
+            }
+
+            return IsKnownTextExtension(inputFile);
+        }
+
+        private bool IsLikelyUtf16Text(byte[] data)
+        {
+            if (HasByteSequence(data, 0, new byte[] { 0xFF, 0xFE }))
+            {
+                return IsDecodedText(data, 2, Encoding.Unicode);
+            }
+
+            if (HasByteSequence(data, 0, new byte[] { 0xFE, 0xFF }))
+            {
+                return IsDecodedText(data, 2, Encoding.BigEndianUnicode);
+            }
+
+            if (data.Length < 8)
+            {
+                return false;
+            }
+
+            int pairs = data.Length / 2;
+            int evenZeroCount = 0;
+            int oddZeroCount = 0;
+            for (int i = 0; i < pairs * 2; i += 2)
+            {
+                if (data[i] == 0)
+                {
+                    evenZeroCount++;
+                }
+
+                if (data[i + 1] == 0)
+                {
+                    oddZeroCount++;
+                }
+            }
+
+            if (oddZeroCount * 100 >= pairs * 60 && evenZeroCount * 100 <= pairs * 20)
+            {
+                return IsDecodedText(data, 0, Encoding.Unicode);
+            }
+
+            if (evenZeroCount * 100 >= pairs * 60 && oddZeroCount * 100 <= pairs * 20)
+            {
+                return IsDecodedText(data, 0, Encoding.BigEndianUnicode);
+            }
+
+            return false;
+        }
+
+        private bool IsStrictUtf8Text(byte[] data)
+        {
+            try
+            {
+                UTF8Encoding strictUtf8 = new UTF8Encoding(false, true);
+                string text = strictUtf8.GetString(data);
+                return HasOnlyTextCharacters(text);
+            }
+            catch (DecoderFallbackException)
+            {
+                return false;
+            }
+        }
+
+        private bool IsDecodedText(byte[] data, int offset, Encoding encoding)
+        {
+            if (offset >= data.Length)
+            {
+                return true;
+            }
+
+            try
+            {
+                string text = encoding.GetString(data, offset, data.Length - offset);
+                return HasOnlyTextCharacters(text);
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+        }
+
+        private bool HasOnlyTextCharacters(string text)
+        {
+            for (int i = 0; i < text.Length; i++)
+            {
+                char current = text[i];
+                if (current == '\uFFFD')
+                {
+                    return false;
+                }
+
+                if (char.IsControl(current) &&
+                    current != '\r' &&
+                    current != '\n' &&
+                    current != '\t' &&
+                    current != '\f' &&
+                    current != '\b')
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private bool HasZeroByte(byte[] data)
+        {
+            for (int i = 0; i < data.Length; i++)
+            {
+                if (data[i] == 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool HasBinaryControlByte(byte[] data)
+        {
+            for (int i = 0; i < data.Length; i++)
+            {
+                byte current = data[i];
+                if (current < 32 &&
+                    current != 9 &&
+                    current != 10 &&
+                    current != 12 &&
+                    current != 13 &&
+                    current != 8)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsKnownTextExtension(string inputFile)
+        {
+            string extension = FileHandle.GetExtension(inputFile).ToLowerInvariant();
+            return extension.Equals(".txt") ||
+                extension.Equals(".lua") ||
+                extension.Equals(".json") ||
+                extension.Equals(".xml") ||
+                extension.Equals(".plist") ||
+                extension.Equals(".csv") ||
+                extension.Equals(".tsv") ||
+                extension.Equals(".ini") ||
+                extension.Equals(".cfg") ||
+                extension.Equals(".conf") ||
+                extension.Equals(".properties") ||
+                extension.Equals(".js") ||
+                extension.Equals(".ts") ||
+                extension.Equals(".css") ||
+                extension.Equals(".html") ||
+                extension.Equals(".htm") ||
+                extension.Equals(".md") ||
+                extension.Equals(".yml") ||
+                extension.Equals(".yaml") ||
+                extension.Equals(".glsl") ||
+                extension.Equals(".vert") ||
+                extension.Equals(".frag") ||
+                extension.Equals(".shader") ||
+                extension.Equals(".atlas") ||
+                extension.Equals(".fnt") ||
+                extension.Equals(".tmx") ||
+                extension.Equals(".tsx");
+        }
+
+        private bool HasAsciiAt(byte[] data, int offset, string value)
+        {
+            if (data == null || value == null || offset < 0 || data.Length < offset + value.Length)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < value.Length; i++)
+            {
+                if (data[offset + i] != (byte)value[i])
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private bool HasByteSequence(byte[] data, int offset, byte[] value)
+        {
+            if (data == null || value == null || offset < 0 || data.Length < offset + value.Length)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < value.Length; i++)
+            {
+                if (data[offset + i] != value[i])
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         private bool DecryptFile(string inputFile, string outputFile)
         {
             bool deleteInputAfterLuacRename = IsOverwriteOriginalMode() && ShouldRenameLuacToLua(outputFile);
@@ -545,6 +1067,11 @@ namespace XXTEADecrypt
             byte[] tmp = new byte[XXTEA_sign.Length];
             if (srcData.Length < XXTEA_sign.Length)
             {
+                if (TryMarkUnencryptedRegularFileAsDecrypted(inputFile, outputFile, srcData, deleteInputAfterLuacRename))
+                {
+                    return true;
+                }
+
                 WriteDetailLog("无法解密，文件长度小于签名--->" + inputFile);
                 return false;
             }
@@ -553,6 +1080,11 @@ namespace XXTEADecrypt
             {
                 if (tmp[i] != XXTEA_sign[i])
                 {
+                    if (TryMarkUnencryptedRegularFileAsDecrypted(inputFile, outputFile, srcData, deleteInputAfterLuacRename))
+                    {
+                        return true;
+                    }
+
                     if (IsOverwriteOriginalMode())
                     {
                         WriteDetailLog("无法解密，原文件未更改--->" + inputFile);
@@ -561,6 +1093,7 @@ namespace XXTEADecrypt
 
                     FileHandle.CopyFile(inputFile, outputFile, true); // 强制覆盖
                     WriteDetailLog("无法解密，已复制原始文件--->" + inputFile);
+                    TryCompressImageToWebPIfSmaller(outputFile);
                     return false;
                 }
             }
@@ -572,12 +1105,22 @@ namespace XXTEADecrypt
             byte[] data2 = mXXTEAHelp.xxtea_decrypt(data, (uint)len, XXTEA_KEY, (uint)XXTEA_KEY.Length, out ret_length);
             if (data2 == null)
             {
+                if (TryMarkUnencryptedRegularFileAsDecrypted(inputFile, outputFile, srcData, deleteInputAfterLuacRename))
+                {
+                    return true;
+                }
+
                 WriteDetailLog("解密失败，检查加密信息--->" + inputFile);
                 return false; 
             }
             
             if (data2.Length < 10)
             {
+                if (TryMarkUnencryptedRegularFileAsDecrypted(inputFile, outputFile, srcData, deleteInputAfterLuacRename))
+                {
+                    return true;
+                }
+
                 WriteDetailLog("Decode Failed--->" + inputFile);
             }
             else
@@ -585,7 +1128,9 @@ namespace XXTEADecrypt
                 if (mFileHandle.FileWrite(data2, outputFile))
                 {
                     WriteDetailLog("解密完成--->" + outputFile);
-                    return DeleteInputFileAfterLuacRename(inputFile, outputFile, deleteInputAfterLuacRename);
+                    bool compressed = TryCompressImageToWebPIfSmaller(outputFile);
+                    bool deletedInput = DeleteInputFileAfterLuacRename(inputFile, outputFile, deleteInputAfterLuacRename);
+                    return compressed && deletedInput;
                 }
             }
             return false; 

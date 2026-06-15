@@ -59,6 +59,7 @@
             this.label5 = new System.Windows.Forms.Label();
             this.luacToluaCB = new System.Windows.Forms.CheckBox();
             this.checkBox_overwriteOriginal = new System.Windows.Forms.CheckBox();
+            this.checkBox_compressWebP = new System.Windows.Forms.CheckBox();
             this.button_openLog = new System.Windows.Forms.Button();
             this.menuStrip1.SuspendLayout();
             this.SuspendLayout();
@@ -368,7 +369,7 @@
             this.label5.AutoSize = true;
             this.label5.Font = new System.Drawing.Font("SimSun", 9.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.label5.ForeColor = System.Drawing.Color.Tomato;
-            this.label5.Location = new System.Drawing.Point(294, 156);
+            this.label5.Location = new System.Drawing.Point(294, 166);
             this.label5.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.label5.Name = "label5";
             this.label5.Size = new System.Drawing.Size(339, 20);
@@ -403,6 +404,18 @@
             this.checkBox_overwriteOriginal.UseVisualStyleBackColor = true;
             this.checkBox_overwriteOriginal.CheckedChanged += new System.EventHandler(this.checkBox_overwriteOriginal_CheckedChanged);
             //
+            // checkBox_compressWebP
+            //
+            this.checkBox_compressWebP.AutoSize = true;
+            this.checkBox_compressWebP.Font = new System.Drawing.Font("SimSun", 9.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            this.checkBox_compressWebP.Location = new System.Drawing.Point(563, 135);
+            this.checkBox_compressWebP.Margin = new System.Windows.Forms.Padding(4);
+            this.checkBox_compressWebP.Name = "checkBox_compressWebP";
+            this.checkBox_compressWebP.Size = new System.Drawing.Size(211, 24);
+            this.checkBox_compressWebP.TabIndex = 29;
+            this.checkBox_compressWebP.Text = "图片转WebP压缩";
+            this.checkBox_compressWebP.UseVisualStyleBackColor = true;
+            //
             // button_openLog
             //
             this.button_openLog.Enabled = false;
@@ -423,6 +436,7 @@
             this.BackColor = System.Drawing.SystemColors.Control;
             this.ClientSize = new System.Drawing.Size(808, 908);
             this.Controls.Add(this.button_openLog);
+            this.Controls.Add(this.checkBox_compressWebP);
             this.Controls.Add(this.checkBox_overwriteOriginal);
             this.Controls.Add(this.luacToluaCB);
             this.Controls.Add(this.label5);
@@ -493,6 +507,7 @@
         private System.Windows.Forms.Label label5;
         private System.Windows.Forms.CheckBox luacToluaCB;
         private System.Windows.Forms.CheckBox checkBox_overwriteOriginal;
+        private System.Windows.Forms.CheckBox checkBox_compressWebP;
         private System.Windows.Forms.Button button_openLog;
     }
 }
